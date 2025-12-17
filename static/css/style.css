@@ -5,8 +5,8 @@
 	font-weight: 400;
 }
 /* Custom styles for CourierTracker UI */
-body { padding-top: 40px; background: #f8f9fa; }
-.container { max-width: 900px; }
+body { padding-top: 0; background: #f8f9fa; }
+.container { max-width: 900px; margin-top: 0 !important; padding-top: 0 !important; }
 .card { margin-top: 16px; }
 .spinner { display:inline-block; width:1.25rem; height:1.25rem; vertical-align:text-bottom }
 .result-json { white-space: pre-wrap; word-break: break-word; }
@@ -32,14 +32,17 @@ body { padding-top: 40px; background: #f8f9fa; }
 	.clear-btn { right: 6px; }
 	.hero-card .card-body { padding: 10px; }
 	.container { padding-left: 2px; padding-right: 2px; }
-	.tracked-controls { flex-direction: column; align-items: stretch; gap: 8px; padding-right: 0; }
+	.tracked-controls { flex-direction: column; align-items: stretch; gap: 8px; padding-right: 0; width: 100%; }
 	.tracked-controls .form-select, .tracked-controls input { width: 100% !important; min-width: 0; max-width: 100%; }
 	.tracked-update-wrapper { position: static; transform: none; margin-left: 0; margin-top: 8px; width: 100%; }
+	#tracked-list, #tracked-list .card, #tracked-list .card .card-body { width: 100% !important; min-width: 0; max-width: 100%; }
 	#tracked-list .card { margin-top: 10px; }
-	#tracked-list .card .card-body { flex-direction: column; align-items: flex-start !important; gap: 8px; }
+	#tracked-list .card .card-body { flex-direction: column; align-items: flex-start !important; gap: 8px; width: 100%; }
 	.tracked-label { margin-left: 0; margin-top: 4px; display: block; }
 	.add-inline-label { max-width: 100%; width: 100%; }
 	.btn-add-inline { width: 100%; margin-top: 6px; }
+	.card, .card-body, .result-json, .history-table, .table-responsive { width: 100% !important; box-sizing: border-box; }
+	.card { min-width: 0; }
 }
 
 /* badge styles inside hero header */

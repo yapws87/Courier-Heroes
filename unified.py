@@ -561,7 +561,7 @@ def track(invc, debug=False):
         return k
     
     if re.match(r"^\d{20}$", invc):
-        seven_el = {'courier': '7-11 착한 택배',
+        seven_el = {'courier': '7-Eleven 착한택배',
                'tracking_number': invc,
                'status': 'unavailable',
                'history': []

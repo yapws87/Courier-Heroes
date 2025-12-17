@@ -448,12 +448,20 @@ document.addEventListener('DOMContentLoaded', function () {
       const details = detailsFor(last);
       return `
       <div class="card mt-2 ${sc}" data-id="${i.id}" tabindex="0" aria-expanded="false">
-        <div class="card-body d-flex justify-content-between align-items-center">
-          <div>
-            <div><strong>${i.tracking}</strong> ${labelHtml} <span class="last-checked-text">${i.last_checked ? 'last checked '+formatTimestamp(i.last_checked) : ''}</span></div>
-            <div class="note">${courierHtml}</div>
+        <div class="card-body d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center">
+          <div class="w-100">
+            <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+              ${last.courier ? `<img src="/static/img/${logo}.svg" class="courier-logo-sm" alt="${last.courier}"> <span class="fw-semibold">${last.courier}</span>` : ''}
+              <span class="ms-1"><strong>${i.tracking}</strong></span>
+              ${labelHtml}
+              ${daysHtml}
+            </div>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <span class="note">${last.status || ''}</span>
+              <span class="last-checked-text ms-2">${i.last_checked ? 'last checked '+formatTimestamp(i.last_checked) : ''}</span>
+            </div>
           </div>
-          <div>
+          <div class="mt-2 mt-md-0">
             <button class="btn-delete-x" title="Remove" aria-label="Remove">&times;</button>
             <button class="btn btn-sm btn-outline-secondary me-2 btn-check">Check</button>
           </div>
@@ -582,104 +590,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Call renderTrackedList early to create the wrapper and fetch items.
   renderTrackedList();
 
-  // Add watchlist controls (add input + check all)
-  (function addWatchlistControls(){
-    const controls = document.createElement('div');
-    controls.className = 'mt-3 d-flex gap-2';
-    controls.innerHTML = `
-      <input id="add-tracking" class="form-control" placeholder="Add tracking number to watchlist" />
-      <input id="add-label" class="form-control" placeholder="Optional label (e.g. 'Mattress order')" />
-      <button class="btn btn-success" id="add-tracking-btn">Add</button>
-      <button class="btn btn-outline-primary" id="check-all-btn" type="button">Check All</button>
-    `;
-    form.parentNode.insertBefore(controls, form.nextSibling);
 
-    // small message area for feedback
-    const msg = document.createElement('div');
-    msg.id = 'add-message-area';
-    msg.style.minHeight = '0';
-    controls.parentNode.insertBefore(msg, controls);
-
-    document.getElementById('add-tracking-btn').addEventListener('click', async (e)=>{
-      e.preventDefault();
-      const val = document.getElementById('add-tracking').value.trim();
-      const label = document.getElementById('add-label').value.trim();
-      if (!val) return;
-      try {
-        const r = await fetch('/api/tracked', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tracking: val, label: label }) });
-        const d = await r.json().catch(()=>({}));
-        if (r.status === 200 || r.status === 201) {
-          document.getElementById('add-tracking').value = '';
-          document.getElementById('add-label').value = '';
-          showAddMessage('Added to watchlist', 'success');
-          // re-render and highlight the new item when ready
-          renderTrackedList();
-          setTimeout(()=>{
-            try {
-              const card = document.querySelector(`#tracked-list .card[data-id='${d.id}']`);
-              if (card) {
-                card.classList.add('added-highlight');
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                setTimeout(()=> card.classList.remove('added-highlight'), 1800);
-              }
-            } catch (err) { console.error('Highlight new item failed', err); }
-          }, 350);
-        } else if (r.status === 409) {
-          showAddMessage('Already tracked', 'warning');
-        } else {
-          showAddMessage('Error adding: '+(d.error || r.statusText), 'danger');
-        }
-      } catch (err) {
-        console.error('Add tracked failed', err);
-        showAddMessage('Network error while adding', 'danger');
-      }
-    });
-
-    document.getElementById('check-all-btn').addEventListener('click', async ()=>{
-      const btn = document.getElementById('check-all-btn');
-      btn.disabled = true;
-
-      // fetch current items and check them one-by-one so each shows its own animation
-      const listResp = await fetch('/api/tracked');
-      const listData = await listResp.json();
-      const items = listData.items || [];
-
-      for (const item of items) {
-        // try to find the card for this item; if absent, skip
-        const card = document.querySelector(`#tracked-list .card[data-id='${item.id}']`);
-        if (!card) continue;
-
-        // show overlay for this card
-        card.classList.add('checking');
-        const overlay = document.createElement('div');
-        overlay.className = 'spinner-overlay';
-        overlay.innerHTML = '<span class="spinner-border text-primary" role="status" aria-hidden="true"></span>';
-        card.appendChild(overlay);
-
-        try {
-          await fetch(`/api/tracked/${item.id}/check`, { method: 'POST' });
-          card.classList.add('checked-success');
-          setTimeout(()=> card.classList.remove('checked-success'), 1000);
-        } catch (err) {
-          card.style.transition = 'background-color .2s ease';
-          card.style.backgroundColor = 'rgba(220,53,69,0.08)';
-          setTimeout(()=> card.style.backgroundColor = '', 1000);
-        } finally {
-          card.classList.remove('checking');
-          if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-          // small pause so user can see the animation before the next one starts
-          await new Promise(r => setTimeout(r, 250));
-        }
-      }
-
-      btn.disabled = false;
-      // refresh the list after all items processed
-      renderTrackedList();
-    });
-
-    // NOTE: sort/status selects are rendered under the 'Tracked numbers' title
-    // and are attached when the tracked list wrapper is created in renderTrackedList().
-  })();
 
   // small helper to show transient messages near the add controls
   function showAddMessage(text, type){

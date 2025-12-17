@@ -9,35 +9,44 @@
     <link href="/static/css/style.css" rel="stylesheet">
   </head>
   <body>
-    <div class="container">
-      <div class="hero-card card mb-4 p-3 shadow-sm">
-        <div class="card-body">
-          <div class="d-flex align-items-start justify-content-between">
-            <div>
-              <h1 class="h2 mb-1 text-primary fw-bold">🚚 <b>Courier Heroes</b> <span class="badge bg-warning text-dark ms-2" style="font-size:0.5em; padding:0.12em 0.3em; vertical-align:middle;">Track Like a Pro!</span></h1>
-              <p class="note mb-0 fst-italic">Unleash your inner delivery hero—track, manage, and conquer your shipments with style!</p>
-            </div>
-            <div class="d-none d-md-flex align-items-center gap-2">
-              <div class="d-none d-md-block text-muted small">Fast, simple, and focused</div>
-            </div>
-          </div>
 
-          <form id="track-form" class="mt-3 d-flex gap-2 align-items-center">
-            <div class="flex-grow-1 position-relative">
-              <input id="tracking-number" name="tracking_number" class="form-control form-control-lg modern-input" placeholder="Enter tracking number" required autofocus />
-              <button id="clear-tracking" type="button" class="btn clear-btn" aria-label="Clear input" title="Clear input">&times;</button>
-            </div>
-            <div class="d-flex gap-2 align-items-center">
-              <div class="form-check me-2">
-                <input class="form-check-input" type="checkbox" value="" id="debug-toggle">
-                <label class="form-check-label" for="debug-toggle">Show debug</label>
-              </div>
-              <button type="submit" class="btn btn-primary btn-lg modern-track-btn">Track</button>
-            </div>
-          </form>
-         
+    <!-- Responsive Navbar Header (top-aligned, outside container) -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm rounded-0 mb-0" style="position:sticky;top:0;z-index:1030;margin-top:0;padding-top:0;">
+      <div class="container-fluid px-3">
+        <a class="navbar-brand d-flex align-items-center fw-bold text-primary" href="#">
+          <span style="font-size:1.7em;">🚚</span>
+          <span class="ms-2 h3 mb-0 fw-bold">Courier Heroes</span>
+          <span class="badge bg-warning text-dark ms-2 align-middle" style="font-size:0.6em; padding:0.12em 0.4em; vertical-align:middle;">Track Like a Pro!</span>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMenu" aria-controls="navbarMenu" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarMenu">
+          <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
+            <!-- Example menu item, add more as needed -->
+            <li class="nav-item">
+              <a class="nav-link disabled" href="#">Menu</a>
+            </li>
+          </ul>
         </div>
       </div>
+    </nav>
+
+    <div class="container" style="margin-top:0;padding-top:0;">
+
+      <form id="track-form" class="mt-3 d-flex gap-2 align-items-center">
+        <div class="flex-grow-1 position-relative">
+          <input id="tracking-number" name="tracking_number" class="form-control form-control-lg modern-input" placeholder="Enter tracking number" required autofocus />
+          <button id="clear-tracking" type="button" class="btn clear-btn" aria-label="Clear input" title="Clear input">&times;</button>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+          <div class="form-check me-2">
+            <input class="form-check-input" type="checkbox" value="" id="debug-toggle">
+            <label class="form-check-label" for="debug-toggle">Show debug</label>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg modern-track-btn">Track</button>
+        </div>
+      </form>
 
       <div id="result"></div>
 
