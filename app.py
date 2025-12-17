@@ -8,6 +8,7 @@ from utils import STATUS_KEYWORDS, classify_status
 from werkzeug.datastructures.structures import ImmutableMultiDict
 
 # Ensure DB created on startup
+import asyncio
 app = Flask(__name__)
 logger: logging.Logger = logging.getLogger("couriertracker")
 if not logger.handlers:

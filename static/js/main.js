@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', function () {
             <div>
               <h5 class="card-title mb-1"><img src="/static/img/${logo}.svg" class="courier-logo" alt="${data.courier || 'Courier'}">${data.courier || 'Unknown'}</h5>
               <p class="mb-1"><strong>Tracking:</strong> ${data.tracking_number || ''}</p>
-              <p class="note mb-0"><strong>Status:</strong> ${data.status || 'Unknown'}</p>
+              <p class="note mb-0"><strong>Status:</strong> ${data.status || 'Unknown'}${typeof data.days_taken === 'number' ? ` <span class='badge bg-info text-dark ms-2'>${data.days_taken} day${data.days_taken === 1 ? '' : 's'}</span>` : ''}</p>
             </div>
             <div class="text-end">
               ${latest.time ? `<small class="text-muted">Latest: ${latest.time}</small>` : ''}
@@ -421,10 +421,28 @@ document.addEventListener('DOMContentLoaded', function () {
       return html;
     }
 
+
+    // Format timestamp as YYYY-MM-DD HH:mm (or fallback to original)
+    function formatTimestamp(ts) {
+      if (!ts) return '';
+      // Try to parse as ISO or common DB format
+      const d = new Date(ts.replace(/-/g, '/').replace('T', ' '));
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth()+1).padStart(2,'0');
+        const day = String(d.getDate()).padStart(2,'0');
+        const h = String(d.getHours()).padStart(2,'0');
+        const min = String(d.getMinutes()).padStart(2,'0');
+        return `${y}-${m}-${day} ${h}:${min}`;
+      }
+      return ts;
+    }
+
     const html = items.map(i => {
       const last = i.last_result || {};
       const logo = last.courier ? courierKey(last.courier) : 'unknown';
-      const courierHtml = last.courier ? `<img src="/static/img/${logo}.svg" class="courier-logo-sm" alt="${last.courier}"> ${last.courier} — ${last.status || ''}` : '';
+      const daysHtml = (typeof last.days_taken === 'number') ? `<span class='badge bg-light text-secondary ms-2' style='border:1px solid #e0e0e0;'>${last.days_taken} day${last.days_taken === 1 ? '' : 's'}</span>` : '';
+      const courierHtml = last.courier ? `<img src="/static/img/${logo}.svg" class="courier-logo-sm" alt="${last.courier}"> ${last.courier} — ${last.status || ''} ${daysHtml}` : daysHtml;
       const labelHtml = i.label ? `<span class="tracked-label small">${i.label}</span>` : '';
       const sc = statusClassFor(last.status);
       const details = detailsFor(last);
@@ -432,7 +450,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <div class="card mt-2 ${sc}" data-id="${i.id}" tabindex="0" aria-expanded="false">
         <div class="card-body d-flex justify-content-between align-items-center">
           <div>
-            <div><strong>${i.tracking}</strong> ${labelHtml} <small class="text-muted">${i.last_checked ? 'last checked '+i.last_checked : ''}</small></div>
+            <div><strong>${i.tracking}</strong> ${labelHtml} <span class="last-checked-text">${i.last_checked ? 'last checked '+formatTimestamp(i.last_checked) : ''}</span></div>
             <div class="note">${courierHtml}</div>
           </div>
           <div>
@@ -480,7 +498,7 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     });
 
-    trackedListDiv.querySelectorAll('.btn-delete').forEach(btn=>{
+    trackedListDiv.querySelectorAll('.btn-delete-x').forEach(btn=>{
       btn.addEventListener('click', async (e)=>{
         e.stopPropagation();
         const card = e.target.closest('.card');
@@ -574,7 +592,7 @@ document.addEventListener('DOMContentLoaded', function () {
       <button class="btn btn-success" id="add-tracking-btn">Add</button>
       <button class="btn btn-outline-primary" id="check-all-btn" type="button">Check All</button>
     `;
-    form.parentNode.insertBefore(controls, resultDiv);
+    form.parentNode.insertBefore(controls, form.nextSibling);
 
     // small message area for feedback
     const msg = document.createElement('div');

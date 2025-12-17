@@ -1,5 +1,20 @@
+import requests
+import httpx
+import asyncio
+from bs4 import BeautifulSoup, ResultSet, Tag
+import re
+import logging
+import utils
+import tracking
+logger = logging.getLogger("unified")
+
 # Async batch tracker for concurrent updates
 async def track_many_async(tracking_items, debug=False):
+    # Create semaphores for each courier type (per event loop)
+    cj_semaphore = asyncio.Semaphore(2)
+    lotte_semaphore = asyncio.Semaphore(2)
+    cu_semaphore = asyncio.Semaphore(2)
+    hanjin_semaphore = asyncio.Semaphore(2)
     tasks = []
     for item in tracking_items:
         if isinstance(item, dict):
@@ -9,11 +24,11 @@ async def track_many_async(tracking_items, debug=False):
             invc = str(item).strip()
             courier = ''
         if courier == 'cj logistics' or courier == 'cj대한통운' or courier == 'cj':
-            tasks.append(track_cj_async(invc, debug=debug))
+            tasks.append(track_cj_async(invc, debug=debug, semaphore=cj_semaphore))
         elif courier == 'cupost' or courier == 'cu post' or courier == 'cu':
-            tasks.append(track_cu_async(invc, debug=debug))
+            tasks.append(track_cu_async(invc, debug=debug, semaphore=cu_semaphore))
         elif courier == 'hanjin' or courier == '한진택배':
-            tasks.append(track_hanjin_async(invc, debug=debug))
+            tasks.append(track_hanjin_async(invc, debug=debug, semaphore=hanjin_semaphore))
         elif courier == 'korea post' or courier == '우체국':
             import asyncio
             loop = asyncio.get_running_loop()
@@ -58,6 +73,14 @@ def normalize(
     if history is None:
         history = []
 
+    # Calculate total days since first event to latest event
+    from utils import parse_time_to_dt
+    days_taken = None
+    if history and isinstance(history, list) and len(history) > 1:
+        first_dt = parse_time_to_dt(history[0].get('time', ''))
+        last_dt = parse_time_to_dt((latest or {}).get('time', ''))
+        if first_dt and last_dt:
+            days_taken = (last_dt - first_dt).days
     return {
         "courier": courier,
         "tracking_number": tracking_number,
@@ -68,19 +91,28 @@ def normalize(
         "destination": "",
         "latest_event": latest,
         "history": history,
+        "days_taken": days_taken,
     }
 
 # -------------------------------------------------------------
 # CJ Logistics (대한통운)
 # -------------------------------------------------------------
-async def track_cj_async(invc, debug=False):
+async def track_cj_async(invc, debug=False, semaphore=None):
     url_csrf = "https://www.cjlogistics.com/ko/tool/parcel/tracking"
     url_detail = "https://www.cjlogistics.com/ko/tool/parcel/tracking-detail"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url_csrf)
-        soup = BeautifulSoup(r.text, "html.parser")
-        csrf = soup.find("input", {"name": "_csrf"})["value"]
-        r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
+    if semaphore is not None:
+        async with semaphore:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url_csrf)
+                soup = BeautifulSoup(r.text, "html.parser")
+                csrf = soup.find("input", {"name": "_csrf"})["value"]
+                r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
+    else:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url_csrf)
+            soup = BeautifulSoup(r.text, "html.parser")
+            csrf = soup.find("input", {"name": "_csrf"})["value"]
+            r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
     data = utils.extract_json(r2.text)
     if not data or "trackingDetails" not in data:
         if debug:
@@ -190,10 +222,15 @@ def track_cvs(invc, debug=False):
 # -------------------------------------------------------------
 # Lotte (롯데택배)
 # -------------------------------------------------------------
-async def track_lotte_async(invc, debug=False):
+async def track_lotte_async(invc, debug=False, semaphore=None):
     url = "https://www.lotteglogis.com/mobile/reservation/tracking/linkView"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(url, data={"InvNo": invc})
+    if semaphore is not None:
+        async with semaphore:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, data={"InvNo": invc})
+    else:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, data={"InvNo": invc})
     try:
         parsed = tracking.parse_tracking_html(r.text)
         events = parsed.get('trackingEvents', [])
@@ -248,14 +285,19 @@ def track_lotte(invc, debug=False):
 # -------------------------------------------------------------
 # CU Post (CUpost)
 # -------------------------------------------------------------
-async def track_cu_async(invc, debug=False):
+async def track_cu_async(invc, debug=False, semaphore=None):
     url = "https://www.cupost.co.kr/mobile/delivery/allResult.cupost"
     payload = {"invoice_no": invc}
 
     headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36"}
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(url, data=payload, headers=headers)
+        if semaphore is not None:
+            async with semaphore:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    r = await client.post(url, data=payload, headers=headers)
+        else:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, data=payload, headers=headers)
     except Exception as e:
         if debug:
             return {"_debug": {"error": str(e)}, "error": "Request failed"}
@@ -316,10 +358,15 @@ def track_cu(invc, debug=False):
 # -------------------------------------------------------------
 # Hanjin (한진택배)
 # -------------------------------------------------------------
-async def track_hanjin_async(invc, debug=False):
+async def track_hanjin_async(invc, debug=False, semaphore=None):
     url = f"https://www.hanjin.co.kr/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&NUM={invc}"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url)
+    if semaphore is not None:
+        async with semaphore:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url)
+    else:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url)
     soup = BeautifulSoup(r.text, "html.parser")
     rows = soup.select("table.tb_deliver tbody tr")
     history = []
