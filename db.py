@@ -1,3 +1,11 @@
+
+import sqlite3
+import json
+from datetime import datetime
+from pathlib import Path
+
+DB_PATH: Path = Path(__file__).resolve().parent / "tracked.db"
+
 def standardize_courier_name(name: str | None) -> str | None:
     if not name:
         return None
@@ -25,13 +33,7 @@ def standardize_courier_name(name: str | None) -> str | None:
         '7-Eleven': '7-Eleven',
     }
     return mapping.get(name, name.title())
-import sqlite3
-import json
-from datetime import datetime
-from pathlib import Path
-from typing import Any
 
-DB_PATH: Path = Path(__file__).resolve().parent / "tracked.db"
 
 def get_conn() -> sqlite3.Connection:
     conn: sqlite3.Connection = sqlite3.connect(str(DB_PATH))

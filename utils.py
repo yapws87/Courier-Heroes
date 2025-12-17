@@ -165,8 +165,9 @@ STATUS_KEYWORDS: dict[str, list[str]] = {
     "delivered": [
         "delivered",
         "배송완료",
-        "배달완료",
         "배송 완료",
+        "배달완료",
+        "배달 완료",
         "고객에게 전달",
         "수령완료",
     ],

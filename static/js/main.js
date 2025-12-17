@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // status keywords (will be fetched from server to keep in sync)
   let STATUS_KEYWORDS = {
-    delivered: ['delivered','배송완료','배달완료','배송 완료','수령','고객에게 전달','수령완료'],
+    delivered: ['delivered','배송완료','배달완료','배달 완료','배송 완료','수령','고객에게 전달','수령완료'],
     error: ['error','not found','notfound','fail','failed','조회불가','unavailable','오류','실패','등록되지','검색 불가','존재하지 않음','없음']
   };
 
@@ -160,11 +160,10 @@ document.addEventListener('DOMContentLoaded', function () {
     showLoading();
 
     try {
-      const debugToggle = document.getElementById('debug-toggle');
       const resp = await fetch('/api/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tracking_number: inv, debug: !!(debugToggle && debugToggle.checked) })
+        body: JSON.stringify({ tracking_number: inv })
       });
 
       const data = await resp.json();
@@ -174,22 +173,6 @@ document.addEventListener('DOMContentLoaded', function () {
       }
 
       renderResult(data);
-      // If debug info exists, show it under the result
-      if (data._debug) {
-        const dbg = data._debug;
-        const dbgHtml = `
-          <div class="card mt-2">
-            <div class="card-body">
-              <h6 class="card-title">Debug</h6>
-              <p><strong>Used:</strong> ${dbg.used || ''}</p>
-              <p><strong>Attempts:</strong> ${JSON.stringify(dbg.attempts || [], null, 2)}</p>
-              ${dbg.status_code ? `<p><strong>Status:</strong> ${dbg.status_code}</p>` : ''}
-              ${dbg.headers ? `<p><strong>Headers:</strong> <pre class="result-json">${JSON.stringify(dbg.headers, null, 2)}</pre></p>` : ''}
-              ${dbg.snippet ? `<details><summary>Raw snippet</summary><pre class="result-json">${dbg.snippet}</pre></details>` : ''}
-            </div>
-          </div>`;
-        resultDiv.insertAdjacentHTML('beforeend', dbgHtml);
-      }
     } catch (err) {
       showError('Request failed', { message: err.message });
     }
