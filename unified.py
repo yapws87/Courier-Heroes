@@ -181,10 +181,20 @@ async def track_cj_async(invc, debug=False, semaphore=None):
             csrf = soup.find("input", {"name": "_csrf"})["value"]
             r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
     data = utils.extract_json(r2.text)
+    
+    # Check for valid data
     if not data or "parcelDetailResultMap" not in data:
         if debug:
             return {"_debug": {"raw": r2.text}, "error": "No tracking data found"}
         return None
+    
+    # Check if resultList is None
+    if len(data["parcelDetailResultMap"]["resultList"]) == 0:
+        if debug:
+            return {"_debug": {"raw": r2.text}, "error": "No tracking data found"}
+        return None
+    
+    # Extract details
     details = data["parcelDetailResultMap"]["resultList"]
     history = [
         {
@@ -626,5 +636,5 @@ if __name__ == "__main__":
     cj = "844324374854"
     
     
-    print(track(cj))
+    print(track(lotte))
     
