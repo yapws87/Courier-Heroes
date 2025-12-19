@@ -8,6 +8,7 @@ from utils import STATUS_KEYWORDS, classify_status
 from werkzeug.datastructures.structures import ImmutableMultiDict
 
 # Ensure DB created on startup
+import asyncio
 app = Flask(__name__)
 logger: logging.Logger = logging.getLogger("couriertracker")
 if not logger.handlers:
@@ -71,7 +72,10 @@ def api_track() -> Response:
 
 @app.route('/api/tracked', methods=['GET'])
 def api_list_tracked() -> Response:
-    items = db.list_tracked()
+    user_id = request.headers.get('X-User-Id')
+    if not user_id:
+        return jsonify({'error': 'Missing X-User-Id header'}), 401
+    items = db.list_tracked(user_id)
     sort = request.args.get('sort')
     order = request.args.get('order', 'desc')
     status_filter = request.args.get('status')
@@ -108,25 +112,32 @@ def api_list_tracked() -> Response:
 
 @app.route('/api/tracked', methods=['POST'])
 def api_add_tracked() -> Response:
+    user_id = request.headers.get('X-User-Id')
+    if not user_id:
+        return jsonify({'error': 'Missing X-User-Id header'}), 401
     payload = request.get_json() or request.form
     tracking = payload.get('tracking')
     label = payload.get('label')
+    courier = payload.get('courier')
     if not tracking:
         return jsonify({'error': 'Missing tracking field'}), 400
-    rowid = db.add_tracked(tracking, label=label)
+    rowid = db.add_tracked(user_id, tracking, courier=courier, label=label)
     if rowid is None:
         return jsonify({'error': 'Already exists'}), 409
-    return jsonify({'id': rowid, 'tracking': tracking, 'label': label})
+    return jsonify({'id': rowid, 'tracking': tracking, 'courier': courier, 'label': label})
 
 
 
 @app.route('/api/tracked/<int:item_id>/label', methods=['POST'])
 def api_update_label(item_id) -> Response:
+    user_id = request.headers.get('X-User-Id')
+    if not user_id:
+        return jsonify({'error': 'Missing X-User-Id header'}), 401
     payload = request.get_json() or request.form
     label = payload.get('label')
     if label is None:
         return jsonify({'error': 'Missing label'}), 400
-    ok = db.update_tracked_label(item_id, label)
+    ok = db.update_tracked_label(user_id, item_id, label)
     if not ok:
         return jsonify({'error': 'Not found'}), 404
     return jsonify({'id': item_id, 'label': label})
@@ -135,7 +146,10 @@ def api_update_label(item_id) -> Response:
 
 @app.route('/api/tracked/<int:item_id>', methods=['DELETE'])
 def api_delete_tracked(item_id) -> Response:
-    ok = db.remove_tracked(item_id)
+    user_id = request.headers.get('X-User-Id')
+    if not user_id:
+        return jsonify({'error': 'Missing X-User-Id header'}), 401
+    ok = db.remove_tracked(user_id, item_id)
     if ok:
         return jsonify({'ok': True})
     return jsonify({'error': 'Not found'}), 404
@@ -144,7 +158,10 @@ def api_delete_tracked(item_id) -> Response:
 
 @app.route('/api/tracked/<int:item_id>/check', methods=['POST'])
 def api_check_tracked(item_id) -> Response:
-    items = db.list_tracked()
+    user_id = request.headers.get('X-User-Id')
+    if not user_id:
+        return jsonify({'error': 'Missing X-User-Id header'}), 401
+    items = db.list_tracked(user_id)
     item = next((i for i in items if i['id'] == item_id), None)
     if not item:
         return jsonify({'error': 'Not found'}), 404
@@ -156,11 +173,14 @@ def api_check_tracked(item_id) -> Response:
 
 @app.route('/api/tracked/check_all', methods=['POST'])
 def api_check_all() -> Response:
+    user_id = request.headers.get('X-User-Id')
+    if not user_id:
+        return jsonify({'error': 'Missing X-User-Id header'}), 401
     from datetime import datetime
-    items = db.list_tracked()
-    tracking_numbers = [i['tracking'] for i in items]
+    items = db.list_tracked(user_id)
+    tracking_items = [{"tracking": i["tracking"], "courier": i.get("courier")} for i in items]
     try:
-        results = asyncio.run(unified.track_many_async(tracking_numbers))
+        results = asyncio.run(unified.track_many_async(tracking_items))
     except Exception as e:
         tb = traceback.format_exc()
         logger.exception('Batch tracking failed')
@@ -181,4 +201,4 @@ def api_status_keywords() -> Response:
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=False)

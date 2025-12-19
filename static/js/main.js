@@ -1,7 +1,76 @@
 document.addEventListener('DOMContentLoaded', function () {
+  // Simple authentication: prompt for user ID if not set
+  function getUserId() {
+    let userId = localStorage.getItem('user_id');
+    if (!userId) {
+      userId = prompt('Enter your user ID (for demo, any string):');
+      if (userId) localStorage.setItem('user_id', userId);
+    }
+    return userId;
+  }
+  const USER_ID = getUserId();
   const form = document.getElementById('track-form');
   const invInput = document.getElementById('tracking-number');
   const resultDiv = document.getElementById('result');
+
+  // User dropdown logic
+  const userDropdownList = document.getElementById('user-dropdown-list');
+  const addNewUserItem = document.getElementById('add-new-user');
+  // Maintain a list of recent user IDs in localStorage
+  function getRecentUserIds() {
+    let ids = [];
+    try {
+      ids = JSON.parse(localStorage.getItem('recent_user_ids') || '[]');
+    } catch {}
+    return Array.isArray(ids) ? ids : [];
+  }
+  function setRecentUserIds(ids) {
+    localStorage.setItem('recent_user_ids', JSON.stringify(ids.slice(0, 6)));
+  }
+  function addRecentUserId(id) {
+    let ids = getRecentUserIds();
+    ids = [id, ...ids.filter(x => x !== id)];
+    setRecentUserIds(ids);
+  }
+  addRecentUserId(USER_ID);
+
+  function renderUserDropdown() {
+    if (!userDropdownList) return;
+    // Remove all except the last item (add/change)
+    while (userDropdownList.children.length > 1) {
+      userDropdownList.removeChild(userDropdownList.firstChild);
+    }
+    const ids = getRecentUserIds();
+    ids.forEach(id => {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.className = 'dropdown-item';
+      a.href = '#';
+      a.textContent = id === USER_ID ? id + ' (current)' : id;
+      if (id === USER_ID) a.style.fontWeight = 'bold';
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (id !== USER_ID) {
+          localStorage.setItem('user_id', id);
+          location.reload();
+        }
+      });
+      li.appendChild(a);
+      userDropdownList.insertBefore(li, userDropdownList.lastElementChild);
+    });
+  }
+  renderUserDropdown();
+  if (addNewUserItem) {
+    addNewUserItem.addEventListener('click', function(e) {
+      e.preventDefault();
+      const newUserId = prompt('Enter a new user ID:');
+      if (newUserId) {
+        localStorage.setItem('user_id', newUserId);
+        addRecentUserId(newUserId);
+        location.reload();
+      }
+    });
+  }
 
   // map courier name (human) to a small image file key
   function courierKey(name) {
@@ -20,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // status keywords (will be fetched from server to keep in sync)
   let STATUS_KEYWORDS = {
-    delivered: ['delivered','배송완료','배달완료','배송 완료','수령','고객에게 전달','수령완료'],
+    delivered: ['delivered','배송완료','배달완료','배달 완료','배송 완료','수령','고객에게 전달','수령완료'],
     error: ['error','not found','notfound','fail','failed','조회불가','unavailable','오류','실패','등록되지','검색 불가','존재하지 않음','없음']
   };
 
@@ -63,7 +132,7 @@ document.addEventListener('DOMContentLoaded', function () {
             <div>
               <h5 class="card-title mb-1"><img src="/static/img/${logo}.svg" class="courier-logo" alt="${data.courier || 'Courier'}">${data.courier || 'Unknown'}</h5>
               <p class="mb-1"><strong>Tracking:</strong> ${data.tracking_number || ''}</p>
-              <p class="note mb-0"><strong>Status:</strong> ${data.status || 'Unknown'}</p>
+              <p class="note mb-0"><strong>Status:</strong> ${data.status || 'Unknown'}${typeof data.days_taken === 'number' ? ` <span class='badge bg-info text-dark ms-2'>${data.days_taken} day${data.days_taken === 1 ? '' : 's'}</span>` : ''}</p>
             </div>
             <div class="text-end">
               ${latest.time ? `<small class="text-muted">Latest: ${latest.time}</small>` : ''}
@@ -123,7 +192,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const labelEl = resultDiv.querySelector('.add-inline-label');
         const label = labelEl ? (labelEl.value || '').trim() : '';
         try {
-          const r = await fetch('/api/tracked', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tracking: tracking, label: label }) });
+          const r = await fetch('/api/tracked', { method: 'POST', headers: {'Content-Type':'application/json', 'X-User-Id': USER_ID}, body: JSON.stringify({ tracking: tracking, label: label }) });
           const d = await r.json().catch(()=>({}));
           if (r.status === 200 || r.status === 201) {
             showAddMessage('Added to watchlist', 'success');
@@ -160,11 +229,10 @@ document.addEventListener('DOMContentLoaded', function () {
     showLoading();
 
     try {
-      const debugToggle = document.getElementById('debug-toggle');
       const resp = await fetch('/api/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tracking_number: inv, debug: !!(debugToggle && debugToggle.checked) })
+        body: JSON.stringify({ tracking_number: inv })
       });
 
       const data = await resp.json();
@@ -174,22 +242,6 @@ document.addEventListener('DOMContentLoaded', function () {
       }
 
       renderResult(data);
-      // If debug info exists, show it under the result
-      if (data._debug) {
-        const dbg = data._debug;
-        const dbgHtml = `
-          <div class="card mt-2">
-            <div class="card-body">
-              <h6 class="card-title">Debug</h6>
-              <p><strong>Used:</strong> ${dbg.used || ''}</p>
-              <p><strong>Attempts:</strong> ${JSON.stringify(dbg.attempts || [], null, 2)}</p>
-              ${dbg.status_code ? `<p><strong>Status:</strong> ${dbg.status_code}</p>` : ''}
-              ${dbg.headers ? `<p><strong>Headers:</strong> <pre class="result-json">${JSON.stringify(dbg.headers, null, 2)}</pre></p>` : ''}
-              ${dbg.snippet ? `<details><summary>Raw snippet</summary><pre class="result-json">${dbg.snippet}</pre></details>` : ''}
-            </div>
-          </div>`;
-        resultDiv.insertAdjacentHTML('beforeend', dbgHtml);
-      }
     } catch (err) {
       showError('Request failed', { message: err.message });
     }
@@ -230,7 +282,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (searchVal) q.push(`q=${encodeURIComponent(searchVal)}`);
     if (q.length) url += '?' + q.join('&');
 
-    const r = await fetch(url, { cache: 'no-store' });
+    const r = await fetch(url, { cache: 'no-store', headers: { 'X-User-Id': USER_ID } });
     const data = await r.json();
     const items = data.items || [];
     // no header badge — nothing to update; wrapper will show items
@@ -318,7 +370,7 @@ document.addEventListener('DOMContentLoaded', function () {
               await Promise.all(toUpdate.map(async (card) => {
                 const id = card.getAttribute('data-id');
                 try {
-                  const r = await fetch(`/api/tracked/${id}/check`, { method: 'POST', cache: 'no-store' });
+                  const r = await fetch(`/api/tracked/${id}/check`, { method: 'POST', cache: 'no-store', headers: { 'X-User-Id': USER_ID } });
                   const data = await r.json().catch(()=>({}));
                   // update last-checked small text
                   const small = card.querySelector('small.text-muted');
@@ -421,21 +473,47 @@ document.addEventListener('DOMContentLoaded', function () {
       return html;
     }
 
+
+    // Format timestamp as YYYY-MM-DD HH:mm (or fallback to original)
+    function formatTimestamp(ts) {
+      if (!ts) return '';
+      // Try to parse as ISO or common DB format
+      const d = new Date(ts.replace(/-/g, '/').replace('T', ' '));
+      if (!isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth()+1).padStart(2,'0');
+        const day = String(d.getDate()).padStart(2,'0');
+        const h = String(d.getHours()).padStart(2,'0');
+        const min = String(d.getMinutes()).padStart(2,'0');
+        return `${y}-${m}-${day} ${h}:${min}`;
+      }
+      return ts;
+    }
+
     const html = items.map(i => {
       const last = i.last_result || {};
       const logo = last.courier ? courierKey(last.courier) : 'unknown';
-      const courierHtml = last.courier ? `<img src="/static/img/${logo}.svg" class="courier-logo-sm" alt="${last.courier}"> ${last.courier} — ${last.status || ''}` : '';
+      const daysHtml = (typeof last.days_taken === 'number') ? `<span class='badge bg-light text-secondary ms-2' style='border:1px solid #e0e0e0;'>${last.days_taken} day${last.days_taken === 1 ? '' : 's'}</span>` : '';
+      const courierHtml = last.courier ? `<img src="/static/img/${logo}.svg" class="courier-logo-sm" alt="${last.courier}"> ${last.courier} — ${last.status || ''} ${daysHtml}` : daysHtml;
       const labelHtml = i.label ? `<span class="tracked-label small">${i.label}</span>` : '';
       const sc = statusClassFor(last.status);
       const details = detailsFor(last);
       return `
       <div class="card mt-2 ${sc}" data-id="${i.id}" tabindex="0" aria-expanded="false">
-        <div class="card-body d-flex justify-content-between align-items-center">
-          <div>
-            <div><strong>${i.tracking}</strong> ${labelHtml} <small class="text-muted">${i.last_checked ? 'last checked '+i.last_checked : ''}</small></div>
-            <div class="note">${courierHtml}</div>
+        <div class="card-body d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center">
+          <div class="w-100">
+            <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+              ${last.courier ? `<img src="/static/img/${logo}.svg" class="courier-logo-sm" alt="${last.courier}"> <span class="fw-semibold">${last.courier}</span>` : ''}
+              <span class="ms-1"><strong>${i.tracking}</strong></span>
+              ${labelHtml}
+              ${daysHtml}
+            </div>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <span class="note">${last.status || ''}</span>
+              <span class="last-checked-text ms-2">${i.last_checked ? 'last checked '+formatTimestamp(i.last_checked) : ''}</span>
+            </div>
           </div>
-          <div>
+          <div class="mt-2 mt-md-0">
             <button class="btn-delete-x" title="Remove" aria-label="Remove">&times;</button>
             <button class="btn btn-sm btn-outline-secondary me-2 btn-check">Check</button>
           </div>
@@ -462,7 +540,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         e.target.disabled = true;
         try {
-          await fetch(`/api/tracked/${id}/check`, { method: 'POST' });
+          await fetch(`/api/tracked/${id}/check`, { method: 'POST', headers: { 'X-User-Id': USER_ID } });
           // success flash
           card.classList.add('checked-success');
           setTimeout(()=> card.classList.remove('checked-success'), 1000);
@@ -480,13 +558,13 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     });
 
-    trackedListDiv.querySelectorAll('.btn-delete').forEach(btn=>{
+    trackedListDiv.querySelectorAll('.btn-delete-x').forEach(btn=>{
       btn.addEventListener('click', async (e)=>{
         e.stopPropagation();
         const card = e.target.closest('.card');
         const id = card.getAttribute('data-id');
         if (!confirm('Remove tracking '+card.querySelector('strong').innerText+'?')) return;
-        await fetch(`/api/tracked/${id}`, { method: 'DELETE' });
+        await fetch(`/api/tracked/${id}`, { method: 'DELETE', headers: { 'X-User-Id': USER_ID } });
         renderTrackedList();
       });
     });
@@ -517,7 +595,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         saveBtn.addEventListener('click', async () => {
           const newLabel = input.value.trim();
-          const r = await fetch(`/api/tracked/${id}/label`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ label: newLabel }) });
+          const r = await fetch(`/api/tracked/${id}/label`, { method: 'POST', headers: {'Content-Type':'application/json', 'X-User-Id': USER_ID}, body: JSON.stringify({ label: newLabel }) });
           if (r.ok) renderTrackedList(); else alert('Failed to save label');
         });
         cancelBtn.addEventListener('click', () => renderTrackedList());
@@ -564,104 +642,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Call renderTrackedList early to create the wrapper and fetch items.
   renderTrackedList();
 
-  // Add watchlist controls (add input + check all)
-  (function addWatchlistControls(){
-    const controls = document.createElement('div');
-    controls.className = 'mt-3 d-flex gap-2';
-    controls.innerHTML = `
-      <input id="add-tracking" class="form-control" placeholder="Add tracking number to watchlist" />
-      <input id="add-label" class="form-control" placeholder="Optional label (e.g. 'Mattress order')" />
-      <button class="btn btn-success" id="add-tracking-btn">Add</button>
-      <button class="btn btn-outline-primary" id="check-all-btn" type="button">Check All</button>
-    `;
-    form.parentNode.insertBefore(controls, resultDiv);
 
-    // small message area for feedback
-    const msg = document.createElement('div');
-    msg.id = 'add-message-area';
-    msg.style.minHeight = '0';
-    controls.parentNode.insertBefore(msg, controls);
-
-    document.getElementById('add-tracking-btn').addEventListener('click', async (e)=>{
-      e.preventDefault();
-      const val = document.getElementById('add-tracking').value.trim();
-      const label = document.getElementById('add-label').value.trim();
-      if (!val) return;
-      try {
-        const r = await fetch('/api/tracked', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tracking: val, label: label }) });
-        const d = await r.json().catch(()=>({}));
-        if (r.status === 200 || r.status === 201) {
-          document.getElementById('add-tracking').value = '';
-          document.getElementById('add-label').value = '';
-          showAddMessage('Added to watchlist', 'success');
-          // re-render and highlight the new item when ready
-          renderTrackedList();
-          setTimeout(()=>{
-            try {
-              const card = document.querySelector(`#tracked-list .card[data-id='${d.id}']`);
-              if (card) {
-                card.classList.add('added-highlight');
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                setTimeout(()=> card.classList.remove('added-highlight'), 1800);
-              }
-            } catch (err) { console.error('Highlight new item failed', err); }
-          }, 350);
-        } else if (r.status === 409) {
-          showAddMessage('Already tracked', 'warning');
-        } else {
-          showAddMessage('Error adding: '+(d.error || r.statusText), 'danger');
-        }
-      } catch (err) {
-        console.error('Add tracked failed', err);
-        showAddMessage('Network error while adding', 'danger');
-      }
-    });
-
-    document.getElementById('check-all-btn').addEventListener('click', async ()=>{
-      const btn = document.getElementById('check-all-btn');
-      btn.disabled = true;
-
-      // fetch current items and check them one-by-one so each shows its own animation
-      const listResp = await fetch('/api/tracked');
-      const listData = await listResp.json();
-      const items = listData.items || [];
-
-      for (const item of items) {
-        // try to find the card for this item; if absent, skip
-        const card = document.querySelector(`#tracked-list .card[data-id='${item.id}']`);
-        if (!card) continue;
-
-        // show overlay for this card
-        card.classList.add('checking');
-        const overlay = document.createElement('div');
-        overlay.className = 'spinner-overlay';
-        overlay.innerHTML = '<span class="spinner-border text-primary" role="status" aria-hidden="true"></span>';
-        card.appendChild(overlay);
-
-        try {
-          await fetch(`/api/tracked/${item.id}/check`, { method: 'POST' });
-          card.classList.add('checked-success');
-          setTimeout(()=> card.classList.remove('checked-success'), 1000);
-        } catch (err) {
-          card.style.transition = 'background-color .2s ease';
-          card.style.backgroundColor = 'rgba(220,53,69,0.08)';
-          setTimeout(()=> card.style.backgroundColor = '', 1000);
-        } finally {
-          card.classList.remove('checking');
-          if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-          // small pause so user can see the animation before the next one starts
-          await new Promise(r => setTimeout(r, 250));
-        }
-      }
-
-      btn.disabled = false;
-      // refresh the list after all items processed
-      renderTrackedList();
-    });
-
-    // NOTE: sort/status selects are rendered under the 'Tracked numbers' title
-    // and are attached when the tracked list wrapper is created in renderTrackedList().
-  })();
 
   // small helper to show transient messages near the add controls
   function showAddMessage(text, type){

@@ -1,0 +1,86 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+.installed.cfg
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+.venv
+venv.bak/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+
+# Jupyter
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# dotenv
+.env
+.env.*
+
+# mypy
+.mypy_cache/
+
+# node
+node_modules/
+
+# static build
+static/build/
+
+# local files
+instance/
+
+# other
+*.swp
+*~
+
+# End of file
