@@ -181,16 +181,16 @@ async def track_cj_async(invc, debug=False, semaphore=None):
             csrf = soup.find("input", {"name": "_csrf"})["value"]
             r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
     data = utils.extract_json(r2.text)
-    if not data or "trackingDetails" not in data:
+    if not data or "parcelDetailResultMap" not in data:
         if debug:
             return {"_debug": {"raw": r2.text}, "error": "No tracking data found"}
         return None
-    details = data["trackingDetails"]
+    details = data["parcelDetailResultMap"]["resultList"]
     history = [
         {
-            "time": d["transTime"].replace("T", " ")[:16],
-            "location": d["transWhere"],
-            "message": d["transKind"],
+            "time": d["dTime"].replace("T", " ")[:16],
+            "location": d["regBranNm"],
+            "message": d["crgNm"],
         }
         for d in details
     ]
@@ -199,8 +199,8 @@ async def track_cj_async(invc, debug=False, semaphore=None):
     out = normalize(
         courier="CJ Logistics",
         tracking_number=invc,
-        sender=data["sender"]["name"],
-        receiver=data["receiver"]["name"],
+        sender=data["parcelResultMap"]["resultList"][0]["sendrNm"],
+        receiver=data["parcelResultMap"]["resultList"][0]["rcvrNm"],
         latest=latest,
         history=history,
     )
@@ -623,7 +623,8 @@ if __name__ == "__main__":
     lotte = "404931271275"
     cu_post = "363225021454"
     gs_post_1 = "210535605545"
+    cj = "844324374854"
     
     
-    print(track(gs_post_1))
+    print(track(cj))
     
