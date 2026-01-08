@@ -16,9 +16,9 @@ def test_sort_and_filter_tracked(tmp_path, monkeypatch):
     db.init_db()
 
     # Insert three tracked items
-    id1 = db.add_tracked('T1')
-    id2 = db.add_tracked('T2')
-    id3 = db.add_tracked('T3')
+    id1 = db.add_tracked('T1', courier='TestCourier')
+    id2 = db.add_tracked('T2', courier='TestCourier')
+    id3 = db.add_tracked('T3', courier='TestCourier')
 
     # Set deterministic created_at timestamps
     conn = db.get_conn()

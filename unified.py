@@ -1,29 +1,116 @@
-# Async batch tracker for concurrent updates
-async def track_many_async(tracking_numbers, debug=False):
+import json
+import requests
+import httpx
+import asyncio
+from bs4 import BeautifulSoup, ResultSet, Tag
+import re
+import logging
+import utils
+import tracking
+logger = logging.getLogger("unified")
+
+# Global semaphores to prevent concurrent execution of the same courier
+_courier_semaphores = {
+    'cj': asyncio.Semaphore(1),
+    'lotte': asyncio.Semaphore(1),
+    'cu': asyncio.Semaphore(1),
+    'hanjin': asyncio.Semaphore(1),
+    'ups': asyncio.Semaphore(1),
+}
+
+async def track_many_async(tracking_items, debug=False):
     tasks = []
-    for invc in tracking_numbers:
-        invc = invc.strip()
-        # Dispatch to the correct async tracker based on number format
-        if re.match(r"^\d{12}$", invc):
-            tasks.append(track_cj_async(invc, debug=debug))
-        elif re.match(r"^\d{11}$", invc):
-            tasks.append(track_cu_async(invc, debug=debug))
-        elif re.match(r"^\d{13}$", invc):
-            # Korea Post is not async yet, fallback to sync in thread
+    for item in tracking_items:
+        if isinstance(item, dict):
+            invc = item.get('tracking', '').strip()
+            courier = (item.get('courier') or '').lower()
+        else:
+            invc = str(item).strip()
+            courier = ''
+        if courier == 'cj logistics' or courier == 'cj대한통운' or courier == 'cj':
+            tasks.append(track_cj_async(invc, semaphore=_courier_semaphores['cj']))
+        elif courier == 'cupost' or courier == 'cu post' or courier == 'cu':
+            tasks.append(track_cu_async(invc, semaphore=_courier_semaphores['cu']))
+        elif courier == 'hanjin' or courier == '한진택배':
+            tasks.append(track_hanjin_async(invc, semaphore=_courier_semaphores['hanjin']))
+        elif courier == 'korea post' or courier == '우체국':
             import asyncio
             loop = asyncio.get_running_loop()
             from functools import partial
-            tasks.append(loop.run_in_executor(None, track_koreapost, invc, debug))
-        elif re.match(r"^\d{10}$", invc):
-            tasks.append(track_hanjin_async(invc, debug=debug))
+            tasks.append(loop.run_in_executor(None, track_koreapost, invc))
+        elif courier == 'ups':
+            tasks.append(track_ups_async(invc, semaphore=_courier_semaphores['ups']))
         else:
             # fallback to sync for unknowns
             import asyncio
             loop = asyncio.get_running_loop()
             from functools import partial
-            tasks.append(loop.run_in_executor(None, track, invc, debug))
+            tasks.append(loop.run_in_executor(None, track, invc))
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
     return results
+
+# -------------------------------------------------------------
+# UPS (United Parcel Service)
+# -------------------------------------------------------------
+    
+# UPS (United Parcel Service) async tracker (moved to module scope)
+async def track_ups_async(invc, debug=False, semaphore=None):
+    url = "https://webapis.ups.com/track/api/Track/GetStatus?loc=ko_KR"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.ups.com",
+        "Referer": "https://www.ups.com/",
+        "User-Agent": "Mozilla/5.0"
+    }
+    payload = {
+        "Locale": "ko_KR",
+        "TrackingNumber": [invc],
+        "isBarcodeScanned": False,
+        "Requester": "st",
+        "ClientUrl": "https://www.ups.com/track?loc=ko_KR&requester=ST/"
+    }
+    if semaphore is not None:
+        async with semaphore:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, headers=headers, content=json.dumps(payload))
+    else:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, headers=headers, content=json.dumps(payload))
+    data = r.json()
+    # Parse UPS response
+    try:
+        shipment = data["trackDetails"][0]
+        history = []
+        for act in shipment.get("shipmentProgressActivities", []):
+            history.append({
+                "time": act.get("date", "") + " " + act.get("time", ""),
+                "location": act.get("location", {}).get("address", {}).get("city", ""),
+                "message": act.get("activityScan", "")
+            })
+        history = utils.normalize_history(history)
+        latest = history[-1] if history else {}
+        out = normalize(
+            courier="UPS",
+            tracking_number=invc,
+            sender=shipment.get("shipper", {}).get("address", {}).get("city", ""),
+            receiver=shipment.get("deliveryTo", {}).get("address", {}).get("city", ""),
+            latest=latest,
+            history=history,
+        )
+        return out
+    except Exception:
+        return {"error": "No tracking data found"}
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return results
+
+# Synchronous wrapper for UPS (moved to module scope)
+def track_ups(invc, debug=False):
+    return asyncio.run(track_ups_async(invc))
+
+
 import requests
 import httpx
 import asyncio
@@ -53,6 +140,14 @@ def normalize(
     if history is None:
         history = []
 
+    # Calculate total days since first event to latest event
+    from utils import parse_time_to_dt
+    days_taken = None
+    if history and isinstance(history, list) and len(history) > 1:
+        first_dt = parse_time_to_dt(history[0].get('time', ''))
+        last_dt = parse_time_to_dt((latest or {}).get('time', ''))
+        if first_dt and last_dt:
+            days_taken = (last_dt - first_dt).days
     return {
         "courier": courier,
         "tracking_number": tracking_number,
@@ -63,30 +158,49 @@ def normalize(
         "destination": "",
         "latest_event": latest,
         "history": history,
+        "days_taken": days_taken,
     }
 
 # -------------------------------------------------------------
 # CJ Logistics (대한통운)
 # -------------------------------------------------------------
-async def track_cj_async(invc, debug=False):
+async def track_cj_async(invc, debug=False, semaphore=None):
     url_csrf = "https://www.cjlogistics.com/ko/tool/parcel/tracking"
     url_detail = "https://www.cjlogistics.com/ko/tool/parcel/tracking-detail"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url_csrf)
-        soup = BeautifulSoup(r.text, "html.parser")
-        csrf = soup.find("input", {"name": "_csrf"})["value"]
-        r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
+    if semaphore is not None:
+        async with semaphore:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url_csrf)
+                soup = BeautifulSoup(r.text, "html.parser")
+                csrf = soup.find("input", {"name": "_csrf"})["value"]
+                r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
+    else:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url_csrf)
+            soup = BeautifulSoup(r.text, "html.parser")
+            csrf = soup.find("input", {"name": "_csrf"})["value"]
+            r2 = await client.post(url_detail, data={"_csrf": csrf, "paramInvcNo": invc})
     data = utils.extract_json(r2.text)
-    if not data or "trackingDetails" not in data:
+    
+    # Check for valid data
+    if not data or "parcelDetailResultMap" not in data:
         if debug:
             return {"_debug": {"raw": r2.text}, "error": "No tracking data found"}
         return None
-    details = data["trackingDetails"]
+    
+    # Check if resultList is None
+    if len(data["parcelDetailResultMap"]["resultList"]) == 0:
+        if debug:
+            return {"_debug": {"raw": r2.text}, "error": "No tracking data found"}
+        return None
+    
+    # Extract details
+    details = data["parcelDetailResultMap"]["resultList"]
     history = [
         {
-            "time": d["transTime"].replace("T", " ")[:16],
-            "location": d["transWhere"],
-            "message": d["transKind"],
+            "time": d["dTime"].replace("T", " ")[:16],
+            "location": d["regBranNm"],
+            "message": d["crgNm"],
         }
         for d in details
     ]
@@ -95,8 +209,8 @@ async def track_cj_async(invc, debug=False):
     out = normalize(
         courier="CJ Logistics",
         tracking_number=invc,
-        sender=data["sender"]["name"],
-        receiver=data["receiver"]["name"],
+        sender=data["parcelResultMap"]["resultList"][0]["sendrNm"],
+        receiver=data["parcelResultMap"]["resultList"][0]["rcvrNm"],
         latest=latest,
         history=history,
     )
@@ -185,10 +299,15 @@ def track_cvs(invc, debug=False):
 # -------------------------------------------------------------
 # Lotte (롯데택배)
 # -------------------------------------------------------------
-async def track_lotte_async(invc, debug=False):
+async def track_lotte_async(invc, debug=False, semaphore=None):
     url = "https://www.lotteglogis.com/mobile/reservation/tracking/linkView"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(url, data={"InvNo": invc})
+    if semaphore is not None:
+        async with semaphore:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, data={"InvNo": invc})
+    else:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, data={"InvNo": invc})
     try:
         parsed = tracking.parse_tracking_html(r.text)
         events = parsed.get('trackingEvents', [])
@@ -243,14 +362,19 @@ def track_lotte(invc, debug=False):
 # -------------------------------------------------------------
 # CU Post (CUpost)
 # -------------------------------------------------------------
-async def track_cu_async(invc, debug=False):
+async def track_cu_async(invc, debug=False, semaphore=None):
     url = "https://www.cupost.co.kr/mobile/delivery/allResult.cupost"
     payload = {"invoice_no": invc}
 
     headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36"}
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(url, data=payload, headers=headers)
+        if semaphore is not None:
+            async with semaphore:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    r = await client.post(url, data=payload, headers=headers)
+        else:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, data=payload, headers=headers)
     except Exception as e:
         if debug:
             return {"_debug": {"error": str(e)}, "error": "Request failed"}
@@ -311,10 +435,15 @@ def track_cu(invc, debug=False):
 # -------------------------------------------------------------
 # Hanjin (한진택배)
 # -------------------------------------------------------------
-async def track_hanjin_async(invc, debug=False):
+async def track_hanjin_async(invc, debug=False, semaphore=None):
     url = f"https://www.hanjin.co.kr/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&NUM={invc}"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url)
+    if semaphore is not None:
+        async with semaphore:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(url)
+    else:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url)
     soup = BeautifulSoup(r.text, "html.parser")
     rows = soup.select("table.tb_deliver tbody tr")
     history = []
@@ -442,85 +571,55 @@ def track_logen(invc, debug=False):
 # -------------------------------------------------------------
 def track(invc, debug=False):
     invc = invc.strip()
-    debug_attempts = []
+    # UPS tracking number auto-detection: 11+ alphanumeric, must contain at least one letter
+    if re.match(r"^[0-9A-Z]{11,}$", invc, re.IGNORECASE) and re.search(r"[A-Z]", invc, re.IGNORECASE):
+        ups = track_ups(invc)
+        if ups and "error" not in ups:
+            return ups
 
-    if re.match(r"^\d{12}$", invc):  # CJ / Lotte / GS25 common
+    # CJ / Lotte / GS25 common
+    if re.match(r"^\d{12}$", invc):
         # Try CJ first
-        cj = track_cj(invc, debug=debug)
+        cj = track_cj(invc)
         if cj and "error" not in cj:
-            if debug:
-                cj.setdefault("_debug", {})
-                cj["_debug"]["attempts"] = debug_attempts
             return cj
-        else:
-            if debug and cj:
-                debug_attempts.append({"courier": "CJ Logistics", "result": cj})
 
         # Try CVSNet
-        cvs = track_cvs(invc, debug=debug)
+        cvs = track_cvs(invc)
         if cvs and "error" not in cvs:
-            if debug:
-                cvs.setdefault("_debug", {})
-                cvs["_debug"]["attempts"] = debug_attempts
             return cvs
-        else:
-            if debug and cvs:
-                debug_attempts.append({"courier": "CVSNet", "result": cvs})
 
         # Try Lotte
-        l = track_lotte(invc, debug=debug)
+        l = track_lotte(invc)
         if l and "error" not in l:
-            if debug:
-                l.setdefault("_debug", {})
-                l["_debug"]["attempts"] = debug_attempts
             return l
-        else:
-            if debug and l:
-                debug_attempts.append({"courier": "Lotte", "result": l})
-    
+
     # CUpost uses 11-digit invoice numbers in many cases
     if re.match(r"^\d{11}$", invc):
-        cu = track_cu(invc, debug=debug)
+        cu = track_cu(invc)
         if cu and "error" not in cu:
-            if debug:
-                cu.setdefault("_debug", {})
-                cu["_debug"]["attempts"] = debug_attempts
             return cu
-        else:
-            if debug and cu:
-                debug_attempts.append({"courier": "CUpost", "result": cu})
-        
-    
-        # track_daesin(invc, debug=debug)
-        # track_logen(invc, debug=debug)
+
+        # track_daesin(invc)
+        # track_logen(invc)
 
     if re.match(r"^\d{10}$", invc):
-        h = track_hanjin(invc, debug=debug)
-        if debug:
-            h.setdefault("_debug", {})
-            h["_debug"]["attempts"] = debug_attempts
+        h = track_hanjin(invc)
         return h
 
     if re.match(r"^\d{13}$", invc):
-        k = track_koreapost(invc, debug=debug)
-        if debug:
-            k.setdefault("_debug", {})
-            k["_debug"]["attempts"] = debug_attempts
+        k = track_koreapost(invc)
         return k
-    
+
     if re.match(r"^\d{20}$", invc):
-        seven_el = {'courier': '7-11 착한 택배',
+        seven_el = {'courier': '7-Eleven 착한택배',
                'tracking_number': invc,
                'status': 'unavailable',
                'history': []
                }
-        # kgl = track_kgl(invc, debug=debug)
-        # if debug:
-        #     kgl.setdefault("_debug", {})
-        #     kgl["_debug"]["attempts"] = debug_attempts
         return seven_el
-    
-    return {"error": "Unknown tracking format", "_debug": {"attempts": debug_attempts} }
+
+    return {"error": "Unknown tracking format"}
 
 # -------------------------------------------------------------
 # Example
@@ -534,7 +633,8 @@ if __name__ == "__main__":
     lotte = "404931271275"
     cu_post = "363225021454"
     gs_post_1 = "210535605545"
+    cj = "844324374854"
     
     
-    print(track(gs_post_1))
+    print(track(lotte))
     
